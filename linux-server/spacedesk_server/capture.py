@@ -297,9 +297,12 @@ class VirtualMonitorCapture:
         )
         serial, monitors, logical_monitors, _props = result.unpack()
 
-        # Rebuild the logical monitor list, applying our scale to the
-        # virtual monitor (identified by its connector containing
-        # "Virtual" or "VIRTUAL") and keeping everything else as-is.
+        for lm in logical_monitors:
+            x, y, cur_scale, transform, primary, monitor_specs, lm_props = lm
+            specs_str = [(spec[0], spec[1]) for spec in monitor_specs]
+            log.debug("DisplayConfig logical monitor: x=%d y=%d scale=%.2f primary=%s specs=%s",
+                      x, y, cur_scale, primary, specs_str)
+
         new_logical = []
         applied = False
         for lm in logical_monitors:

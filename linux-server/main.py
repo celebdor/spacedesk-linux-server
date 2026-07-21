@@ -60,6 +60,8 @@ if __name__ == "__main__":
                         help="Virtual monitor width in pixels (default: 1920)")
     parser.add_argument("--height", type=int, default=1200,
                         help="Virtual monitor height in pixels (default: 1200)")
+    parser.add_argument("--quality", type=int, default=None,
+                        help="JPEG quality 1-100 (default: 95 for USB, 55 for WiFi)")
 
     vid_group = parser.add_mutually_exclusive_group()
     vid_group.add_argument("--autodetect", action="store_true",
@@ -97,4 +99,5 @@ if __name__ == "__main__":
          normal_pid=normal_pid,
          scale=args.scale,
          width=args.width, height=args.height,
+         quality=args.quality,
          debug=args.debug)

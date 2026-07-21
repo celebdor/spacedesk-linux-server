@@ -134,7 +134,8 @@ class SharedCapture:
 
 
 async def handle_client(reader, writer, shared_capture: SharedCapture,
-                        scale: float = 1.0, width: int = 1920, height: int = 1200) -> None:
+                        scale: float = 1.0, width: int = 1920, height: int = 1200,
+                        quality: int | None = None) -> None:
     addr = writer.get_extra_info("peername")
     log.info("Nueva conexion desde %s", addr)
 
@@ -152,11 +153,12 @@ async def handle_client(reader, writer, shared_capture: SharedCapture,
     except (asyncio.IncompleteReadError, ConnectionError):
         return
 
-    await handle_connection(conn, addr, shared_capture, scale=scale, width=width, height=height)
+    await handle_connection(conn, addr, shared_capture, scale=scale, width=width, height=height, quality=quality)
 
 
 async def handle_connection(conn, addr, shared_capture: SharedCapture,
-                           scale: float = 1.0, width: int = 1920, height: int = 1200) -> None:
+                           scale: float = 1.0, width: int = 1920, height: int = 1200,
+                           quality: int | None = None) -> None:
     """Maneja una sesion completa (handshake + sender/receiver) sobre una
     Connection ya establecida -- usado tanto por TCP/WebSocket (handle_client)
     como por USB (usb_transport.usb_acceptor_loop), que solo difieren en como
@@ -188,7 +190,7 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture,
     # Calidad mas alta para USB: el cuello de botella de WiFi (ver memoria del
     # proyecto, ~200-400ms de espera por frame) no aplica sobre USB2 bulk
     # (~480Mbps), asi que no hace falta comprimir tan agresivo.
-    jpeg_quality = 95 if addr == "USB" else 55
+    jpeg_quality = quality if quality is not None else (95 if addr == "USB" else 55)
     capture = await shared_capture.get_or_create(width, height, jpeg_quality, scale=scale)
 
     # Sin esto la app se queda mostrando "Display off" indefinidamente aunque
@@ -285,6 +287,7 @@ async def run_server(usb_only: bool = False,
                      normal_pid: int | None = None,
                      scale: float = 1.0,
                      width: int = 1920, height: int = 1200,
+                     quality: int | None = None,
                      debug: bool = False) -> None:
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -298,7 +301,7 @@ async def run_server(usb_only: bool = False,
 
     usb_task = asyncio.create_task(
         usb_transport.usb_acceptor_loop(
-            lambda conn, addr: handle_connection(conn, addr, shared_capture, scale=scale, width=width, height=height),
+            lambda conn, addr: handle_connection(conn, addr, shared_capture, scale=scale, width=width, height=height, quality=quality),
             **usb_kwargs)
     )
 
@@ -308,7 +311,7 @@ async def run_server(usb_only: bool = False,
     else:
         await start_discovery_responder()
         server = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, shared_capture, scale=scale, width=width, height=height), "0.0.0.0", LISTEN_PORT
+            lambda r, w: handle_client(r, w, shared_capture, scale=scale, width=width, height=height, quality=quality), "0.0.0.0", LISTEN_PORT
         )
         log.info("Servidor spacedesk-linux escuchando en puerto %d (monitor virtual se crea al conectar)",
                   LISTEN_PORT)
@@ -321,6 +324,7 @@ def main(usb_only: bool = False,
          normal_pid: int | None = None,
          scale: float = 1.0,
          width: int = 1920, height: int = 1200,
+         quality: int | None = None,
          debug: bool = False) -> None:
     try:
         asyncio.run(run_server(usb_only=usb_only,
@@ -328,6 +332,7 @@ def main(usb_only: bool = False,
                                normal_pid=normal_pid,
                                scale=scale,
                                width=width, height=height,
+                               quality=quality,
                                debug=debug))
     except KeyboardInterrupt:
         pass
