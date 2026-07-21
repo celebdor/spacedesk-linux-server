@@ -27,6 +27,14 @@ PROTOCOL_VERSION_MINOR = 8
 DISCOVERY_PORT = 28252
 DISCOVERY_MAGIC = b"SPACEDESK-NET-CLIENT\x00"
 
+# The largest legitimate payload is a JPEG FrameBuffer: typically under 2 MiB at
+# 1920x1200 quality 95; an uncompressed RGB24 frame at that resolution would be
+# ~6.6 MiB (1920*1200*3).  16 MiB gives ~2.5x headroom above the theoretical
+# uncompressed max.  Client-to-server packets (Touch, Mouse, Keyboard,
+# FlowControlAck) carry zero payload, so this limit is effectively
+# defense-in-depth for the server direction.
+MAX_PAYLOAD = 16 * 1024 * 1024
+
 
 class HeaderType(enum.IntEnum):
     IDENTIFICATION = 0
@@ -154,7 +162,10 @@ def header_type(header: bytes) -> int:
 
 def payload_length(header: bytes) -> int:
     """Lee offset 4: cantidad de bytes de payload que siguen al header de 128 bytes."""
-    return get_i32(header, 4)
+    length = get_i32(header, 4)
+    if length < 0 or length > MAX_PAYLOAD:
+        raise ValueError(f"payload length out of bounds: {length}")
+    return length
 
 
 # ---------------------------------------------------------------------------

@@ -76,7 +76,11 @@ class Connection:
             header = await self.reader.readexactly(proto.HEADER_LEN)
         except (asyncio.IncompleteReadError, ConnectionError):
             return None
-        length = proto.payload_length(header)
+        try:
+            length = proto.payload_length(header)
+        except ValueError as e:
+            log.warning("Invalid payload length, closing connection: %s", e)
+            return None
         payload = b""
         if length > 0:
             try:
@@ -268,32 +272,31 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture) -> None:
     log.info("Conexion cerrada: %s", addr)
 
 
-async def run_server() -> None:
+async def run_server(usb_only: bool = False) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     shared_capture = SharedCapture()
-    await start_discovery_responder()
 
-    server = await asyncio.start_server(
-        lambda r, w: handle_client(r, w, shared_capture), "0.0.0.0", LISTEN_PORT
-    )
-    log.info("Servidor spacedesk-linux escuchando en puerto %d (monitor virtual se crea al conectar)",
-              LISTEN_PORT)
-
-    # Transporte USB (Android Open Accessory) en paralelo al TCP/WebSocket --
-    # ambos comparten la misma SharedCapture, asi que es "la" misma pantalla
-    # extendida sin importar por donde se conecte la tablet. Se auto-deshabilita
-    # con un solo log.warning si pyusb no esta instalado (ver usb_transport.py).
     usb_task = asyncio.create_task(
         usb_transport.usb_acceptor_loop(lambda conn, addr: handle_connection(conn, addr, shared_capture))
     )
 
-    async with server:
-        await asyncio.gather(server.serve_forever(), usb_task)
+    if usb_only:
+        log.info("Modo USB-only: TCP y discovery deshabilitados")
+        await usb_task
+    else:
+        await start_discovery_responder()
+        server = await asyncio.start_server(
+            lambda r, w: handle_client(r, w, shared_capture), "0.0.0.0", LISTEN_PORT
+        )
+        log.info("Servidor spacedesk-linux escuchando en puerto %d (monitor virtual se crea al conectar)",
+                  LISTEN_PORT)
+        async with server:
+            await asyncio.gather(server.serve_forever(), usb_task)
 
 
-def main() -> None:
+def main(usb_only: bool = False) -> None:
     try:
-        asyncio.run(run_server())
+        asyncio.run(run_server(usb_only=usb_only))
     except KeyboardInterrupt:
         pass

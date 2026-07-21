@@ -177,20 +177,44 @@ class VirtualMonitorCapture:
         except GLib.Error:
             log.exception("No se pudo leer Stream.Parameters para diagnostico")
 
-        self._pipeline = Gst.parse_launch(
-            f"pipewiresrc path={node_id} ! "
-            # Sin width/height aca, PipeWire negocia su tamaño por defecto
-            # (confirmado empiricamente: 1280x720) en vez del tamaño real del
-            # monitor virtual que configuramos en RecordVirtual -- forzar el
-            # caps filter justo despues de pipewiresrc es lo que hace que la
-            # negociacion SPA elija el modo que pedimos.
-            f"video/x-raw,width={self.width},height={self.height} ! "
-            f"videoconvert ! "
-            f"video/x-raw,format=I420 ! "
-            f"jpegenc quality={self.jpeg_quality} ! "
-            f"appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
-        )
-        sink = self._pipeline.get_by_name("sink")
+        pipeline = Gst.Pipeline.new("capture-pipeline")
+
+        src = Gst.ElementFactory.make("pipewiresrc", "src")
+        src.set_property("path", str(node_id))
+
+        # Sin este caps filter, PipeWire negocia su tamaño por defecto
+        # (confirmado empiricamente: 1280x720) en vez del tamaño real del
+        # monitor virtual que configuramos en RecordVirtual -- forzar el
+        # caps filter justo despues de pipewiresrc es lo que hace que la
+        # negociacion SPA elija el modo que pedimos.
+        capsfilter1 = Gst.ElementFactory.make("capsfilter", "caps1")
+        capsfilter1.set_property("caps", Gst.Caps.from_string(
+            f"video/x-raw,width={int(self.width)},height={int(self.height)}"
+        ))
+
+        convert = Gst.ElementFactory.make("videoconvert", "convert")
+
+        capsfilter2 = Gst.ElementFactory.make("capsfilter", "caps2")
+        capsfilter2.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+
+        enc = Gst.ElementFactory.make("jpegenc", "enc")
+        enc.set_property("quality", int(self.jpeg_quality))
+
+        sink = Gst.ElementFactory.make("appsink", "sink")
+        sink.set_property("emit-signals", True)
+        sink.set_property("max-buffers", 1)
+        sink.set_property("drop", True)
+        sink.set_property("sync", False)
+
+        for el in (src, capsfilter1, convert, capsfilter2, enc, sink):
+            pipeline.add(el)
+        src.link(capsfilter1)
+        capsfilter1.link(convert)
+        convert.link(capsfilter2)
+        capsfilter2.link(enc)
+        enc.link(sink)
+
+        self._pipeline = pipeline
         sink.connect("new-sample", self._on_sample)
         self._pipeline.set_state(Gst.State.PLAYING)
         log.info("Pipeline de captura iniciado")

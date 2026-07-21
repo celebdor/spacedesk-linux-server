@@ -163,7 +163,11 @@ class UsbConnection:
             if not self._read_chunk():
                 return None
         header = bytes(self._buf[: proto.HEADER_LEN])
-        length = proto.payload_length(header)
+        try:
+            length = proto.payload_length(header)
+        except ValueError as e:
+            log.warning("Invalid USB payload length, dropping connection: %s", e)
+            return None
         while len(self._buf) < proto.HEADER_LEN + length:
             if not self._read_chunk():
                 return None
