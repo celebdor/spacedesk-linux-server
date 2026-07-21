@@ -297,6 +297,23 @@ class VirtualMonitorCapture:
         )
         serial, monitors, logical_monitors, _props = result.unpack()
 
+        # Build connector → current mode_id map from the monitors array.
+        # GetCurrentState monitors: (connector, vendor, product, serial),
+        # modes: [(mode_id, w, h, refresh, preferred_scale, scales, props)]
+        # The current mode has "is-current" = true in its props dict.
+        current_mode = {}
+        for mon in monitors:
+            mon_spec, modes, _mon_props = mon
+            connector = mon_spec[0]
+            for mode in modes:
+                mode_id = mode[0]
+                mode_props = mode[6] if len(mode) > 6 else {}
+                if mode_props.get("is-current", False):
+                    current_mode[connector] = mode_id
+                    break
+            if connector not in current_mode and modes:
+                current_mode[connector] = modes[0][0]
+
         for lm in logical_monitors:
             x, y, cur_scale, transform, primary, monitor_specs, lm_props = lm
             specs_str = [(spec[0], spec[1]) for spec in monitor_specs]
@@ -313,7 +330,7 @@ class VirtualMonitorCapture:
                 applied = True
             new_logical.append(GLib.Variant("(iiduba(ssa{sv}))", (
                 x, y, scale, transform, primary,
-                [(spec[0], spec[1], {}) for spec in monitor_specs],
+                [(spec[0], current_mode.get(spec[0], ""), {}) for spec in monitor_specs],
             )))
 
         if not applied:
