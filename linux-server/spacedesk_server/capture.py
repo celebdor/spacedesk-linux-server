@@ -68,6 +68,10 @@ REMOTEDESKTOP_BUS_NAME = "org.gnome.Mutter.RemoteDesktop"
 REMOTEDESKTOP_OBJECT_PATH = "/org/gnome/Mutter/RemoteDesktop"
 REMOTEDESKTOP_SESSION_IFACE = "org.gnome.Mutter.RemoteDesktop.Session"
 
+DISPLAY_CONFIG_BUS_NAME = "org.gnome.Mutter.DisplayConfig"
+DISPLAY_CONFIG_OBJECT_PATH = "/org/gnome/Mutter/DisplayConfig"
+DISPLAY_CONFIG_IFACE = "org.gnome.Mutter.DisplayConfig"
+
 
 class VirtualMonitorCapture:
     """Crea la sesión RemoteDesktop+ScreenCast de `width`x`height` y entrega
@@ -76,10 +80,12 @@ class VirtualMonitorCapture:
     `stream_path` para que `input.py` pueda inyectar input en el mismo
     stream."""
 
-    def __init__(self, width: int, height: int, jpeg_quality: int = 55):
+    def __init__(self, width: int, height: int, jpeg_quality: int = 55,
+                 scale: float = 1.0):
         self.width = width
         self.height = height
         self.jpeg_quality = jpeg_quality
+        self.scale = scale
 
         self._frame_queue: queue.Queue[bytes] = queue.Queue(maxsize=1)
         self._last_frame: bytes | None = None
@@ -177,23 +183,25 @@ class VirtualMonitorCapture:
         except GLib.Error:
             log.exception("No se pudo leer Stream.Parameters para diagnostico")
 
+        if self.scale != 1.0:
+            self._apply_scale()
+
         pipeline = Gst.Pipeline.new("capture-pipeline")
 
         src = Gst.ElementFactory.make("pipewiresrc", "src")
         src.set_property("path", str(node_id))
 
+        # Force PipeWire to deliver frames at exactly the requested
+        # resolution — without this it defaults to 1280x720.
+        capsfilter1 = Gst.ElementFactory.make("capsfilter", "caps1")
+        capsfilter1.set_property("caps", Gst.Caps.from_string(
+            f"video/x-raw,width={int(self.width)},height={int(self.height)}"
+        ))
+
         convert = Gst.ElementFactory.make("videoconvert", "convert")
 
-        # videoscale normalizes frames back to our target size if GNOME
-        # changes the stream resolution (e.g. display scaling).  The
-        # output caps filter is on the videoscale *output*, not on
-        # pipewiresrc, so the source is free to renegotiate.
-        scale = Gst.ElementFactory.make("videoscale", "scale")
-
-        capsfilter = Gst.ElementFactory.make("capsfilter", "caps")
-        capsfilter.set_property("caps", Gst.Caps.from_string(
-            f"video/x-raw,format=I420,width={int(self.width)},height={int(self.height)}"
-        ))
+        capsfilter2 = Gst.ElementFactory.make("capsfilter", "caps2")
+        capsfilter2.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
 
         enc = Gst.ElementFactory.make("jpegenc", "enc")
         enc.set_property("quality", int(self.jpeg_quality))
@@ -204,12 +212,12 @@ class VirtualMonitorCapture:
         sink.set_property("drop", True)
         sink.set_property("sync", False)
 
-        for el in (src, convert, scale, capsfilter, enc, sink):
+        for el in (src, capsfilter1, convert, capsfilter2, enc, sink):
             pipeline.add(el)
-        src.link(convert)
-        convert.link(scale)
-        scale.link(capsfilter)
-        capsfilter.link(enc)
+        src.link(capsfilter1)
+        capsfilter1.link(convert)
+        convert.link(capsfilter2)
+        capsfilter2.link(enc)
         enc.link(sink)
 
         self._pipeline = pipeline
@@ -271,6 +279,52 @@ class VirtualMonitorCapture:
             except GLib.Error:
                 pass
         self._loop.quit()
+
+    def _apply_scale(self) -> None:
+        """Apply the GNOME display scale to the virtual monitor via
+        org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig.  Must be
+        called after Start() so the virtual monitor is visible in the
+        display config.  Fractional values (1.25, 1.5, ...) require
+        the experimental feature 'scale-monitor-framebuffer' enabled:
+          gsettings set org.gnome.mutter experimental-features \\
+            "['scale-monitor-framebuffer']"
+        """
+        result = self.conn.call_sync(
+            DISPLAY_CONFIG_BUS_NAME, DISPLAY_CONFIG_OBJECT_PATH,
+            DISPLAY_CONFIG_IFACE, "GetCurrentState", None,
+            GLib.VariantType.new("(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})"),
+            Gio.DBusCallFlags.NONE, -1, None,
+        )
+        serial, monitors, logical_monitors, _props = result.unpack()
+
+        # Rebuild the logical monitor list, applying our scale to the
+        # virtual monitor (identified by its connector containing
+        # "Virtual" or "VIRTUAL") and keeping everything else as-is.
+        new_logical = []
+        applied = False
+        for lm in logical_monitors:
+            x, y, cur_scale, transform, primary, monitor_specs, lm_props = lm
+            is_virtual = any("irtual" in spec[0] for spec in monitor_specs)
+            scale = self.scale if is_virtual else cur_scale
+            if is_virtual:
+                applied = True
+            new_logical.append(GLib.Variant("(iiduba(ssa{sv}))", (
+                x, y, scale, transform, primary,
+                [(spec[0], spec[1], {}) for spec in monitor_specs],
+            )))
+
+        if not applied:
+            log.warning("No virtual monitor found in DisplayConfig — scale not applied")
+            return
+
+        # method=2 = TEMPORARY (doesn't persist across sessions)
+        self.conn.call_sync(
+            DISPLAY_CONFIG_BUS_NAME, DISPLAY_CONFIG_OBJECT_PATH,
+            DISPLAY_CONFIG_IFACE, "ApplyMonitorsConfig",
+            GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})", (serial, 2, new_logical, {})),
+            None, Gio.DBusCallFlags.NONE, -1, None,
+        )
+        log.info("Display scale %.2f applied to virtual monitor", self.scale)
 
     def _call(self, obj_path, iface, method, arg_variant, return_type, bus_name):
         return_variant_type = GLib.VariantType.new(return_type) if return_type else None

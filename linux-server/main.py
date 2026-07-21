@@ -64,12 +64,21 @@ if __name__ == "__main__":
     parser.add_argument("--pid", type=lambda x: int(x, 16), default=None,
                         help="Tablet PID in normal mode (hex, e.g. 6860)")
 
+    VALID_SCALES = [1.0 + 0.25 * i for i in range(13)]  # 1.0, 1.25, ..., 4.0
+    parser.add_argument(
+        "--scale", type=float, default=1.0,
+        help="GNOME display scale for the virtual monitor (1.0-4.0 in 0.25 steps). "
+             "Fractional values require: gsettings set org.gnome.mutter "
+             "experimental-features \"['scale-monitor-framebuffer']\"")
+
     args = parser.parse_args()
 
     if args.autodetect and (args.vid is not None or args.pid is not None):
         parser.error("--autodetect cannot be combined with --vid/--pid")
     if (args.vid is None) != (args.pid is None):
         parser.error("--vid and --pid must be specified together")
+    if args.scale not in VALID_SCALES:
+        parser.error(f"--scale must be one of: {', '.join(f'{s:.2f}' for s in VALID_SCALES)}")
 
     normal_vid, normal_pid = None, None
     if args.autodetect:
@@ -79,4 +88,5 @@ if __name__ == "__main__":
 
     main(usb_only=args.usb_only,
          normal_vid=normal_vid,
-         normal_pid=normal_pid)
+         normal_pid=normal_pid,
+         scale=args.scale)

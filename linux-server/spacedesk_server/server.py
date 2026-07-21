@@ -119,19 +119,22 @@ class SharedCapture:
         self._capture: VirtualMonitorCapture | None = None
         self._lock = asyncio.Lock()
 
-    async def get_or_create(self, width: int, height: int, jpeg_quality: int) -> VirtualMonitorCapture:
+    async def get_or_create(self, width: int, height: int, jpeg_quality: int,
+                           scale: float = 1.0) -> VirtualMonitorCapture:
         async with self._lock:
             if self._capture is None:
                 loop = asyncio.get_event_loop()
-                cap = VirtualMonitorCapture(width, height, jpeg_quality=jpeg_quality)
+                cap = VirtualMonitorCapture(width, height, jpeg_quality=jpeg_quality,
+                                            scale=scale)
                 await loop.run_in_executor(None, cap.start)
                 self._capture = cap
-                log.info("Monitor virtual creado a demanda: %dx%d, calidad=%d",
-                         width, height, jpeg_quality)
+                log.info("Monitor virtual creado a demanda: %dx%d, calidad=%d, escala=%.2f",
+                         width, height, jpeg_quality, scale)
             return self._capture
 
 
-async def handle_client(reader, writer, shared_capture: SharedCapture) -> None:
+async def handle_client(reader, writer, shared_capture: SharedCapture,
+                        scale: float = 1.0) -> None:
     addr = writer.get_extra_info("peername")
     log.info("Nueva conexion desde %s", addr)
 
@@ -149,10 +152,11 @@ async def handle_client(reader, writer, shared_capture: SharedCapture) -> None:
     except (asyncio.IncompleteReadError, ConnectionError):
         return
 
-    await handle_connection(conn, addr, shared_capture)
+    await handle_connection(conn, addr, shared_capture, scale=scale)
 
 
-async def handle_connection(conn, addr, shared_capture: SharedCapture) -> None:
+async def handle_connection(conn, addr, shared_capture: SharedCapture,
+                           scale: float = 1.0) -> None:
     """Maneja una sesion completa (handshake + sender/receiver) sobre una
     Connection ya establecida -- usado tanto por TCP/WebSocket (handle_client)
     como por USB (usb_transport.usb_acceptor_loop), que solo difieren en como
@@ -181,7 +185,7 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture) -> None:
     # proyecto, ~200-400ms de espera por frame) no aplica sobre USB2 bulk
     # (~480Mbps), asi que no hace falta comprimir tan agresivo.
     jpeg_quality = 95 if addr == "USB" else 55
-    capture = await shared_capture.get_or_create(1920, 1200, jpeg_quality)
+    capture = await shared_capture.get_or_create(1920, 1200, jpeg_quality, scale=scale)
 
     # Sin esto la app se queda mostrando "Display off" indefinidamente aunque
     # ya le estemos mandando FrameBuffer -- ver protocol.py build_visibility_header.
@@ -274,7 +278,8 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture) -> None:
 
 async def run_server(usb_only: bool = False,
                      normal_vid: int | None = None,
-                     normal_pid: int | None = None) -> None:
+                     normal_pid: int | None = None,
+                     scale: float = 1.0) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     shared_capture = SharedCapture()
@@ -286,7 +291,7 @@ async def run_server(usb_only: bool = False,
 
     usb_task = asyncio.create_task(
         usb_transport.usb_acceptor_loop(
-            lambda conn, addr: handle_connection(conn, addr, shared_capture),
+            lambda conn, addr: handle_connection(conn, addr, shared_capture, scale=scale),
             **usb_kwargs)
     )
 
@@ -296,7 +301,7 @@ async def run_server(usb_only: bool = False,
     else:
         await start_discovery_responder()
         server = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, shared_capture), "0.0.0.0", LISTEN_PORT
+            lambda r, w: handle_client(r, w, shared_capture, scale=scale), "0.0.0.0", LISTEN_PORT
         )
         log.info("Servidor spacedesk-linux escuchando en puerto %d (monitor virtual se crea al conectar)",
                   LISTEN_PORT)
@@ -306,10 +311,12 @@ async def run_server(usb_only: bool = False,
 
 def main(usb_only: bool = False,
          normal_vid: int | None = None,
-         normal_pid: int | None = None) -> None:
+         normal_pid: int | None = None,
+         scale: float = 1.0) -> None:
     try:
         asyncio.run(run_server(usb_only=usb_only,
                                normal_vid=normal_vid,
-                               normal_pid=normal_pid))
+                               normal_pid=normal_pid,
+                               scale=scale))
     except KeyboardInterrupt:
         pass
