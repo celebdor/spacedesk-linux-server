@@ -272,13 +272,22 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture) -> None:
     log.info("Conexion cerrada: %s", addr)
 
 
-async def run_server(usb_only: bool = False) -> None:
+async def run_server(usb_only: bool = False,
+                     normal_vid: int | None = None,
+                     normal_pid: int | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     shared_capture = SharedCapture()
 
+    usb_kwargs = {}
+    if normal_vid is not None and normal_pid is not None:
+        usb_kwargs["normal_vid"] = normal_vid
+        usb_kwargs["normal_pid"] = normal_pid
+
     usb_task = asyncio.create_task(
-        usb_transport.usb_acceptor_loop(lambda conn, addr: handle_connection(conn, addr, shared_capture))
+        usb_transport.usb_acceptor_loop(
+            lambda conn, addr: handle_connection(conn, addr, shared_capture),
+            **usb_kwargs)
     )
 
     if usb_only:
@@ -295,8 +304,12 @@ async def run_server(usb_only: bool = False) -> None:
             await asyncio.gather(server.serve_forever(), usb_task)
 
 
-def main(usb_only: bool = False) -> None:
+def main(usb_only: bool = False,
+         normal_vid: int | None = None,
+         normal_pid: int | None = None) -> None:
     try:
-        asyncio.run(run_server(usb_only=usb_only))
+        asyncio.run(run_server(usb_only=usb_only,
+                               normal_vid=normal_vid,
+                               normal_pid=normal_pid))
     except KeyboardInterrupt:
         pass

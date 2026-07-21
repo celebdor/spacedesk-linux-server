@@ -86,17 +86,17 @@ def _do_handshake(dev) -> None:
     usb.util.dispose_resources(dev)
 
 
-def wait_for_accessory():
+def wait_for_accessory(normal_vid=NORMAL_VID, normal_pid=NORMAL_PID):
     """Bloqueante. Devuelve un device ya en accessory mode con la interfaz
     reclamada, o None si no hay ninguna tablet conectada (ni en modo normal
     ni en accessory) en este momento -- el llamador debe reintentar."""
     dev = _find_accessory()
     if dev is None:
-        normal = usb.core.find(idVendor=NORMAL_VID, idProduct=NORMAL_PID)
+        normal = usb.core.find(idVendor=normal_vid, idProduct=normal_pid)
         if normal is None:
             return None
         log.info("Tablet detectada en modo normal (%04x:%04x), iniciando handshake AOA",
-                  NORMAL_VID, NORMAL_PID)
+                  normal_vid, normal_pid)
         try:
             _do_handshake(normal)
         except usb.core.USBError as e:
@@ -224,7 +224,7 @@ class UsbConnection:
         usb.util.dispose_resources(self._dev)
 
 
-async def usb_acceptor_loop(on_connection):
+async def usb_acceptor_loop(on_connection, normal_vid=NORMAL_VID, normal_pid=NORMAL_PID):
     """Loop perpetuo: espera la tablet por USB, atiende una sesion completa,
     y al desconectarse (cable, o cierre de la app) vuelve a esperar.
 
@@ -237,10 +237,12 @@ async def usb_acceptor_loop(on_connection):
         return
 
     loop = asyncio.get_event_loop()
-    log.info("Esperando tablet por USB (Android Open Accessory)...")
+    log.info("Esperando tablet por USB (%04x:%04x / Android Open Accessory)...",
+             normal_vid, normal_pid)
     while True:
         try:
-            dev = await loop.run_in_executor(None, wait_for_accessory)
+            dev = await loop.run_in_executor(
+                None, lambda: wait_for_accessory(normal_vid, normal_pid))
         except usb.core.USBError as e:
             # Puede pasar con un device "stale" (de una sesion anterior que ya
             # se cerro del lado de la tablet) -- nunca debe tirar abajo todo

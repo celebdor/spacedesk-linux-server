@@ -1,6 +1,8 @@
 # spacedesk USB / Android Open Accessory (AOA)
 # Da acceso al usuario de la sesion activa a la tablet, tanto en modo normal
-# (HONOR 339b:107d) como cuando entra en accessory mode (Google 18d1:2dxx).
+# como cuando entra en accessory mode (Google 18d1:2dxx).
+# For other tablets, add a rule with your device's VID/PID (run lsusb to find them):
+#   SUBSYSTEM=="usb", ATTR{idVendor}=="XXXX", ATTR{idProduct}=="YYYY", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTR{idVendor}=="339b", ATTR{idProduct}=="107d", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 # Android Open Accessory PIDs only (not all Google USB devices)
 SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", ATTR{idProduct}=="2d00", MODE="0660", GROUP="plugdev", TAG+="uaccess"
