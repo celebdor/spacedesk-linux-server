@@ -110,6 +110,7 @@ class VirtualInput:
     # -- Mouse: posición absoluta confirmada; bits exactos de button_flags NO
     # confirmados contra código decompilado -- best effort, validar con logcat. --
     def handle_mouse(self, pkt: MousePacket) -> None:
+        log.debug("MOUSE x=%d y=%d wheel=%d btn=0x%x", pkt.x, pkt.y, pkt.wheel_delta, pkt.button_flags)
         if pkt.wheel_delta:
             steps = 1 if pkt.wheel_delta > 0 else -1
             self._call("NotifyPointerAxisDiscrete", GLib.Variant("(ui)", (0, steps)))

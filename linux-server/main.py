@@ -54,6 +54,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="spacedesk Linux server")
     parser.add_argument("--usb-only", action="store_true",
                         help="Only accept USB connections (disable TCP/WebSocket and UDP discovery)")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable debug logging (verbose mouse/touch events, etc.)")
+    parser.add_argument("--width", type=int, default=1920,
+                        help="Virtual monitor width in pixels (default: 1920)")
+    parser.add_argument("--height", type=int, default=1200,
+                        help="Virtual monitor height in pixels (default: 1200)")
 
     vid_group = parser.add_mutually_exclusive_group()
     vid_group.add_argument("--autodetect", action="store_true",
@@ -89,4 +95,6 @@ if __name__ == "__main__":
     main(usb_only=args.usb_only,
          normal_vid=normal_vid,
          normal_pid=normal_pid,
-         scale=args.scale)
+         scale=args.scale,
+         width=args.width, height=args.height,
+         debug=args.debug)

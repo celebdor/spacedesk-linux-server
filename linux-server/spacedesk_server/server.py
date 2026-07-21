@@ -134,7 +134,7 @@ class SharedCapture:
 
 
 async def handle_client(reader, writer, shared_capture: SharedCapture,
-                        scale: float = 1.0) -> None:
+                        scale: float = 1.0, width: int = 1920, height: int = 1200) -> None:
     addr = writer.get_extra_info("peername")
     log.info("Nueva conexion desde %s", addr)
 
@@ -152,11 +152,11 @@ async def handle_client(reader, writer, shared_capture: SharedCapture,
     except (asyncio.IncompleteReadError, ConnectionError):
         return
 
-    await handle_connection(conn, addr, shared_capture, scale=scale)
+    await handle_connection(conn, addr, shared_capture, scale=scale, width=width, height=height)
 
 
 async def handle_connection(conn, addr, shared_capture: SharedCapture,
-                           scale: float = 1.0) -> None:
+                           scale: float = 1.0, width: int = 1920, height: int = 1200) -> None:
     """Maneja una sesion completa (handshake + sender/receiver) sobre una
     Connection ya establecida -- usado tanto por TCP/WebSocket (handle_client)
     como por USB (usb_transport.usb_acceptor_loop), que solo difieren en como
@@ -173,6 +173,10 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture,
         return
     ident = proto.IdentificationPacket.parse(header)
     log.info("Cliente identificado (%s): %r", addr, ident)
+    log.debug("Identification raw: width=%d height=%d width_custom=%d height_custom=%d "
+              "resolution_mode=%d frame_rate=%d subsampling=%d",
+              ident.width, ident.height, ident.width_custom, ident.height_custom,
+              ident.resolution_mode, ident.frame_rate, ident.subsampling)
 
     # La SurfaceView donde la app dibuja es SIEMPRE 1920x1200 (confirmado con
     # logcat real: "addSurfaceChangedCallback ... 0,0-1920,1200"), sin importar
@@ -185,7 +189,7 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture,
     # proyecto, ~200-400ms de espera por frame) no aplica sobre USB2 bulk
     # (~480Mbps), asi que no hace falta comprimir tan agresivo.
     jpeg_quality = 95 if addr == "USB" else 55
-    capture = await shared_capture.get_or_create(1920, 1200, jpeg_quality, scale=scale)
+    capture = await shared_capture.get_or_create(width, height, jpeg_quality, scale=scale)
 
     # Sin esto la app se queda mostrando "Display off" indefinidamente aunque
     # ya le estemos mandando FrameBuffer -- ver protocol.py build_visibility_header.
@@ -279,8 +283,11 @@ async def handle_connection(conn, addr, shared_capture: SharedCapture,
 async def run_server(usb_only: bool = False,
                      normal_vid: int | None = None,
                      normal_pid: int | None = None,
-                     scale: float = 1.0) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+                     scale: float = 1.0,
+                     width: int = 1920, height: int = 1200,
+                     debug: bool = False) -> None:
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     shared_capture = SharedCapture()
 
@@ -291,7 +298,7 @@ async def run_server(usb_only: bool = False,
 
     usb_task = asyncio.create_task(
         usb_transport.usb_acceptor_loop(
-            lambda conn, addr: handle_connection(conn, addr, shared_capture, scale=scale),
+            lambda conn, addr: handle_connection(conn, addr, shared_capture, scale=scale, width=width, height=height),
             **usb_kwargs)
     )
 
@@ -301,7 +308,7 @@ async def run_server(usb_only: bool = False,
     else:
         await start_discovery_responder()
         server = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, shared_capture, scale=scale), "0.0.0.0", LISTEN_PORT
+            lambda r, w: handle_client(r, w, shared_capture, scale=scale, width=width, height=height), "0.0.0.0", LISTEN_PORT
         )
         log.info("Servidor spacedesk-linux escuchando en puerto %d (monitor virtual se crea al conectar)",
                   LISTEN_PORT)
@@ -312,11 +319,15 @@ async def run_server(usb_only: bool = False,
 def main(usb_only: bool = False,
          normal_vid: int | None = None,
          normal_pid: int | None = None,
-         scale: float = 1.0) -> None:
+         scale: float = 1.0,
+         width: int = 1920, height: int = 1200,
+         debug: bool = False) -> None:
     try:
         asyncio.run(run_server(usb_only=usb_only,
                                normal_vid=normal_vid,
                                normal_pid=normal_pid,
-                               scale=scale))
+                               scale=scale,
+                               width=width, height=height,
+                               debug=debug))
     except KeyboardInterrupt:
         pass
