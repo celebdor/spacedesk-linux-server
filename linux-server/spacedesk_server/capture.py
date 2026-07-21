@@ -182,20 +182,18 @@ class VirtualMonitorCapture:
         src = Gst.ElementFactory.make("pipewiresrc", "src")
         src.set_property("path", str(node_id))
 
-        # Sin este caps filter, PipeWire negocia su tamaño por defecto
-        # (confirmado empiricamente: 1280x720) en vez del tamaño real del
-        # monitor virtual que configuramos en RecordVirtual -- forzar el
-        # caps filter justo despues de pipewiresrc es lo que hace que la
-        # negociacion SPA elija el modo que pedimos.
-        capsfilter1 = Gst.ElementFactory.make("capsfilter", "caps1")
-        capsfilter1.set_property("caps", Gst.Caps.from_string(
-            f"video/x-raw,width={int(self.width)},height={int(self.height)}"
-        ))
-
         convert = Gst.ElementFactory.make("videoconvert", "convert")
 
-        capsfilter2 = Gst.ElementFactory.make("capsfilter", "caps2")
-        capsfilter2.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+        # videoscale normalizes frames back to our target size if GNOME
+        # changes the stream resolution (e.g. display scaling).  The
+        # output caps filter is on the videoscale *output*, not on
+        # pipewiresrc, so the source is free to renegotiate.
+        scale = Gst.ElementFactory.make("videoscale", "scale")
+
+        capsfilter = Gst.ElementFactory.make("capsfilter", "caps")
+        capsfilter.set_property("caps", Gst.Caps.from_string(
+            f"video/x-raw,format=I420,width={int(self.width)},height={int(self.height)}"
+        ))
 
         enc = Gst.ElementFactory.make("jpegenc", "enc")
         enc.set_property("quality", int(self.jpeg_quality))
@@ -206,12 +204,12 @@ class VirtualMonitorCapture:
         sink.set_property("drop", True)
         sink.set_property("sync", False)
 
-        for el in (src, capsfilter1, convert, capsfilter2, enc, sink):
+        for el in (src, convert, scale, capsfilter, enc, sink):
             pipeline.add(el)
-        src.link(capsfilter1)
-        capsfilter1.link(convert)
-        convert.link(capsfilter2)
-        capsfilter2.link(enc)
+        src.link(convert)
+        convert.link(scale)
+        scale.link(capsfilter)
+        capsfilter.link(enc)
         enc.link(sink)
 
         self._pipeline = pipeline
