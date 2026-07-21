@@ -307,7 +307,7 @@ class VirtualMonitorCapture:
         applied = False
         for lm in logical_monitors:
             x, y, cur_scale, transform, primary, monitor_specs, lm_props = lm
-            is_virtual = any("irtual" in spec[0] for spec in monitor_specs)
+            is_virtual = any("irtual" in spec[0] or spec[0].startswith("Meta-") for spec in monitor_specs)
             scale = self.scale if is_virtual else cur_scale
             if is_virtual:
                 applied = True
